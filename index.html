@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Debug Buddy: an IB Computer Science trace table game. Squash bugs, upgrade Bolt the robot, and repair him by tracing Python code.">
+<title>Debug Buddy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Silkscreen&family=Chakra+Petch:wght@400;600;700&family=Fira+Code:wght@500;600&display=swap">
+<style>
+/* Layout: "Bolt OS" retro desktop. The stage is the desktop (bugs crawl on it), windows with bevelled chrome float on top, a taskbar runs along the bottom. Single look on purpose. */
+:root {
+  --desk: #22305f;
+  --desk-2: #18234a;
+  --win: #c9c3b5;
+  --win-hi: #f3eee2;
+  --win-lo: #6c665a;
+  --field: #f7f3ea;
+  --ink: #15120e;
+  --title-a: #6e1c1c;
+  --title-b: #c8512a;
+  --zap: #ffd23f;
+  --bug: #e2457a;
+  --term: #0f1526;
+  --good: #2c7a47;
+  --bad: #a3322a;
+  --pixel: "Pixelify Sans", "Courier New", monospace;
+  --label: "Silkscreen", "Courier New", monospace;
+  --body: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --code: "Fira Code", ui-monospace, "Consolas", monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--desk); color: var(--ink); font-family: var(--body); font-size: 16px; overflow: hidden; }
+#app { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
+#stage { position: relative; flex: 1; min-height: 0; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+
+/* window chrome */
+.win { background: var(--win); border: 2px solid; border-color: var(--win-hi) var(--win-lo) var(--win-lo) var(--win-hi); box-shadow: 2px 2px 0 var(--ink); }
+.titlebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: linear-gradient(90deg, var(--title-a), var(--title-b)); color: var(--win-hi); font: 400 13px var(--label); padding: 4px 4px 4px 8px; letter-spacing: 0.02em; }
+.titlebar .ctl { display: flex; gap: 3px; }
+.titlebar .ctl span { width: 16px; height: 14px; background: var(--win); border: 1px solid; border-color: var(--win-hi) var(--win-lo) var(--win-lo) var(--win-hi); color: var(--ink); font: 700 10px/12px var(--body); text-align: center; }
+.wbody { padding: 14px 16px; }
+.bevel-in { border: 2px solid; border-color: var(--win-lo) var(--win-hi) var(--win-hi) var(--win-lo); }
+
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); box-sizing: border-box; background: rgba(10, 14, 30, 0.55); overflow-y: auto; z-index: 5; }
+.dialog { width: min(1000px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box; }
+.dialog.narrow { width: min(660px, 100%); }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+h1 { font: 700 clamp(44px, 8vw, 76px)/0.95 var(--pixel); margin: 0; color: var(--title-a); text-wrap: balance; }
+h2 { font: 700 26px/1.1 var(--pixel); margin: 0; text-wrap: balance; }
+p { margin: 0; line-height: 1.5; max-width: 64ch; }
+.tag { font: 400 11px var(--label); letter-spacing: 0.06em; color: var(--win-lo); }
+.villain { display: flex; gap: 12px; align-items: center; background: var(--term); color: var(--win-hi); padding: 10px 12px; }
+.villain svg { flex: none; }
+.villain p { font-family: var(--code); font-size: 14px; }
+.villain b { color: var(--bug); font-weight: 600; }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.how div { background: var(--field); padding: 10px 12px; min-width: 0; line-height: 1.45; font-size: 15px; }
+.how b { display: block; font: 400 12px var(--label); color: var(--title-a); margin-bottom: 4px; }
+.btn { font: 700 16px var(--body); letter-spacing: 0.02em; background: var(--win); color: var(--ink); border: 2px solid; border-color: var(--win-hi) var(--ink) var(--ink) var(--win-hi); padding: 7px 18px; cursor: pointer; box-shadow: inset -1px -1px 0 var(--win-lo); }
+.btn.primary { background: var(--zap); }
+.btn:active:not([disabled]) { border-color: var(--ink) var(--win-hi) var(--win-hi) var(--ink); box-shadow: inset 1px 1px 0 var(--win-lo); }
+.btn[disabled] { color: var(--win-lo); cursor: not-allowed; background: var(--win); }
+.btn:focus-visible, .seg button:focus-visible, .tt input:focus-visible, .tbtn:focus-visible { outline: 2px dashed var(--ink); outline-offset: 2px; }
+.seg { display: inline-flex; gap: 4px; }
+.seg button { font: 700 15px var(--body); background: var(--win); color: var(--ink); border: 2px solid; border-color: var(--win-hi) var(--ink) var(--ink) var(--win-hi); padding: 5px 16px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--term); color: var(--zap); border-color: var(--ink) var(--win-hi) var(--win-hi) var(--ink); }
+.note { font-size: 14px; color: #3d382f; line-height: 1.45; }
+
+/* repair: debugger window */
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 760px) { .bench { grid-template-columns: 1fr; } }
+.code { background: var(--term); color: #e6e2d6; padding: 10px 0; font: 500 15px/1.7 var(--code); font-variant-ligatures: none; overflow-x: auto; }
+.code .ln { display: flex; white-space: pre; padding-right: 14px; }
+.code .n { color: #5b6585; width: 2.6em; text-align: right; padding-right: 12px; flex: none; user-select: none; }
+.code .ind { display: inline-block; border-left: 1px dashed #47527a; }
+.kw { color: #ff8a5c; } .num { color: #7fd6ff; } .str { color: var(--zap); } .fn { color: #e0a5ff; }
+.ttwrap { overflow-x: auto; background: var(--field); }
+.tt { border-collapse: collapse; font-family: var(--code); font-variant-ligatures: none; font-size: 14px; width: 100%; }
+.tt th { font: 400 11px var(--label); color: var(--ink); text-align: left; padding: 6px; background: var(--win); border-bottom: 2px solid var(--win-lo); white-space: nowrap; }
+.tt td { padding: 3px 4px; border-bottom: 1px solid #d9d2c2; }
+.tt td.rl { color: var(--win-lo); font: 400 10px var(--label); white-space: nowrap; padding-right: 8px; }
+.tt td.given { color: #5b554a; font-style: italic; padding: 7px 6px; }
+.tt input { width: 100%; min-width: 3.5em; box-sizing: border-box; font: 500 15px var(--code); font-variant-ligatures: none; background: #fff; color: var(--ink); border: 2px solid; border-color: var(--win-lo) var(--win-hi) var(--win-hi) var(--win-lo); padding: 4px 6px; }
+.tt input.ok { background: var(--good); color: #fff; }
+.tt input.no { background: var(--bad); color: #fff; }
+.tt input.close { background: var(--zap); color: var(--ink); }
+.tt input.fix { background: var(--term); color: var(--zap); }
+.tt input:disabled { opacity: 1; -webkit-text-fill-color: currentColor; }
+.verdict { font: 700 22px var(--pixel); }
+.verdict.good { color: var(--good); } .verdict.bad { color: var(--bad); }
+.explain { background: var(--field); padding: 10px 12px; line-height: 1.5; font-size: 15px; border-left: 4px solid var(--title-b); }
+.explain code { font-family: var(--code); font-size: 14px; color: var(--title-a); font-weight: 600; }
+.statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.statgrid div { background: var(--field); padding: 8px 10px; }
+.big { font: 700 34px var(--pixel); font-variant-numeric: tabular-nums; }
+
+/* upgrades window, docked on the desktop */
+#shop { position: absolute; top: 12px; right: max(12px, env(safe-area-inset-right, 0px)); width: 290px; max-height: calc(100% - 24px); display: flex; flex-direction: column; z-index: 3; }
+#shop .list { overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.bytes { font: 700 22px var(--pixel); padding: 8px 10px 0; display: flex; justify-content: space-between; align-items: baseline; }
+.bytes small { font: 400 10px var(--label); color: var(--win-lo); }
+.up { background: var(--field); padding: 7px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.up .nm { font: 700 15px var(--body); }
+.up .pips { font: 400 10px var(--label); color: var(--title-b); letter-spacing: 1px; }
+.up .ds { grid-column: 1 / -1; font-size: 13px; color: #4a4439; line-height: 1.3; }
+.up .btn { grid-row: 1 / 3; grid-column: 2; padding: 4px 9px; font-size: 14px; white-space: nowrap; }
+.up.locked { opacity: 0.6; }
+@media (max-width: 820px) {
+  #shop { top: auto; bottom: 8px; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); width: auto; max-height: 52%; }
+  #shop.collapsed .list, #shop.collapsed .bytes { display: none; }
+}
+
+/* taskbar */
+#taskbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: var(--win); border-top: 2px solid var(--win-hi); padding: 5px max(10px, env(safe-area-inset-right, 0px)) calc(5px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); font-size: 13px; z-index: 6; }
+.startbtn { font: 700 15px var(--pixel); display: flex; align-items: center; gap: 6px; padding: 3px 10px; border: 2px solid; border-color: var(--win-hi) var(--ink) var(--ink) var(--win-hi); margin-right: auto; }
+.startbtn i { width: 12px; height: 12px; background: var(--zap); border: 2px solid var(--ink); display: inline-block; }
+.cell { display: flex; align-items: center; gap: 6px; padding: 2px 8px; font-family: var(--code); font-variant-numeric: tabular-nums; border: 2px solid; border-color: var(--win-lo) var(--win-hi) var(--win-hi) var(--win-lo); }
+.cell .lbl { font: 400 10px var(--label); color: var(--win-lo); }
+#batt { width: 90px; height: 10px; background: var(--term); position: relative; }
+#battFill { position: absolute; inset: 0 auto 0 0; background: var(--zap); width: 100%; }
+.tbtn { font: 400 11px var(--label); background: var(--win); color: var(--ink); border: 2px solid; border-color: var(--win-hi) var(--ink) var(--ink) var(--win-hi); padding: 3px 8px; cursor: pointer; }
+#shopToggle { display: none; }
+@media (max-width: 820px) { #shopToggle { display: inline-block; } }
+.toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 4; background: var(--term); color: var(--zap); font: 500 16px var(--code); padding: 7px 14px; border: 2px solid var(--zap); pointer-events: none; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 821px) { .toast { left: calc(50% - 150px); } }
+</style>
+
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="toast" class="toast" hidden></div>
+
+    <div id="shop" class="win collapsed" hidden>
+      <div class="titlebar"><span>UPGRADES.EXE</span><span class="ctl"><span>_</span><span>&#9633;</span><span>x</span></span></div>
+      <div class="bytes"><span><span id="bytes">0</span> B</span><small id="bps"></small></div>
+      <div class="list" id="shopList"></div>
+    </div>
+
+    <div id="titleScreen" class="overlay">
+      <div class="dialog narrow win">
+        <div class="titlebar"><span>BOLT_OS.EXE</span><span class="ctl"><span>_</span><span>&#9633;</span><span>x</span></span></div>
+        <div class="wbody stack">
+          <span class="tag">IB COMPUTER SCIENCE // TRACE TABLES</span>
+          <h1>Debug Buddy</h1>
+          <div class="villain" id="titleVillain"></div>
+          <div class="how">
+            <div><b>SQUASH</b>Bugs crawl across the desktop toward Bolt. Click them. Squashed bugs drop bytes.</div>
+            <div><b>UPGRADE</b>Spend bytes on an auto-zapper, chain lightning, a firewall and more. Bolt starts fighting back on his own.</div>
+            <div><b>REPAIR</b>Each round ends with a broken part and a Python snippet. Trace it in the debugger to fix him.</div>
+          </div>
+          <div class="row">
+            <span class="tag">COURSE</span>
+            <div class="seg" role="group" aria-label="Course level">
+              <button type="button" id="slBtn" aria-pressed="true">SL</button>
+              <button type="button" id="hlBtn" aria-pressed="false">HL</button>
+            </div>
+            <span class="note" id="modeNote">Loops, conditionals, strings and lists.</span>
+          </div>
+          <div class="row"><button class="btn primary" id="startBtn" type="button">Boot Bolt</button><span class="note" id="bestLine"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="repairScreen" class="overlay" hidden>
+      <div class="dialog win">
+        <div class="titlebar"><span id="rWinTitle">DEBUGGER.EXE</span><span class="ctl"><span>_</span><span>&#9633;</span><span>x</span></span></div>
+        <div class="wbody stack">
+          <div class="villain" id="rVillain"></div>
+          <div class="row" style="justify-content:space-between"><h2 id="rTitle">Fix the antenna</h2><span class="tag" id="rTag">LEVEL 1</span></div>
+          <div class="bench">
+            <div class="stack" style="min-width:0">
+              <div class="code bevel-in" id="rCode"></div>
+              <p class="note" id="rNote"></p>
+            </div>
+            <div class="stack" style="min-width:0">
+              <div class="ttwrap bevel-in"><table class="tt" id="rTable"></table></div>
+              <div class="row" id="rCheckRow"><button class="btn primary" id="rCheck" type="button">Check my trace</button><span class="note" id="rTries">2 checks before the part sparks out.</span></div>
+              <div id="rResult" class="stack" hidden>
+                <div class="verdict" id="rVerdict"></div>
+                <div class="explain" id="rExplain"></div>
+                <div class="row"><button class="btn primary" id="rNext" type="button">Back to the bugs</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="levelScreen" class="overlay" hidden>
+      <div class="dialog narrow win">
+        <div class="titlebar"><span>SYSTEM_RESTORED.TXT</span><span class="ctl"><span>x</span></span></div>
+        <div class="wbody stack">
+          <h2 id="lvTitle">Bolt is fully repaired!</h2>
+          <div class="villain" id="lvVillain"></div>
+          <p id="lvLine"></p>
+          <div class="row"><button class="btn primary" id="lvNext" type="button">Next level</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="overScreen" class="overlay" hidden>
+      <div class="dialog narrow win">
+        <div class="titlebar"><span>FATAL_ERROR.LOG</span><span class="ctl"><span>x</span></span></div>
+        <div class="wbody stack">
+          <h2>Bolt powered down on level <span id="oLevel">1</span></h2>
+          <div class="statgrid">
+            <div><span class="tag">SCORE</span><div class="big" id="oScore">0</div></div>
+            <div><span class="tag">PERFECT REPAIRS</span><div class="big" id="oPerfect">0/0</div></div>
+            <div><span class="tag">BUGS SQUASHED</span><div class="big" id="oBugs">0</div></div>
+            <div><span class="tag">PERSONAL BEST</span><div class="big" id="oBest">0</div></div>
+          </div>
+          <p id="oLine"></p>
+          <div class="row"><button class="btn primary" id="againBtn" type="button">Reboot Bolt</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="taskbar">
+    <span class="startbtn"><i></i>Debug Buddy</span>
+    <span class="cell"><span class="lbl">LV</span><span id="hLevel">1</span></span>
+    <span class="cell"><span class="lbl">SCORE</span><span id="hScore">0</span></span>
+    <span class="cell"><span class="lbl">BATT</span><span id="batt"><span id="battFill"></span></span></span>
+    <span class="cell"><span class="lbl">FIXED</span><span id="hParts">0/5</span></span>
+    <span class="cell"><span class="lbl">TIME</span><span id="hTime">&mdash;</span></span>
+    <button class="tbtn" id="shopToggle" type="button">Upgrades</button>
+    <button class="tbtn" id="muteBtn" type="button">Sound: on</button>
+  </div>
+</div>
+
+<script id="gen">
+/* ===== Trace-table snippet generators (pure logic, no DOM). Each one simulates its own Python code. ===== */
+var DB = (function () {
+  function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+  function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function shuffle(a) { a = a.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function distinct(n, lo, hi) { var pool = []; for (var v = lo; v <= hi; v++) pool.push(v); return shuffle(pool).slice(0, n); }
+  // Python's str() for the values we use
+  function py(v) {
+    if (v === null) return null;
+    if (typeof v === "boolean") return v ? "True" : "False";
+    if (Array.isArray(v)) return "[" + v.map(py).join(", ") + "]";
+    return String(v);
+  }
+  function lit(arr) { return "[" + arr.join(", ") + "]"; }
+  var LOOP_NOTE = "One row per pass of the loop. Write each variable's value at the <b>end</b> of that pass.";
+
+  function tAccum() {
+    var x0 = ri(2, 5), k = ri(3, 4);
+    var x = x0, total = 0, rows = [];
+    for (var i = 1; i <= k; i++) { total = total + x * i; x = x - 1; rows.push([i, total, x]); }
+    return {
+      id: "accum", lines: ["x = " + x0, "total = 0", "for i in range(1, " + (k + 1) + "):", "    total = total + x * i", "    x = x - 1", "print(total)"],
+      cols: ["i", "total", "x"], start: ["—", 0, x0], rows: rows, output: py(total), note: LOOP_NOTE,
+      trace: { after: 4, indent: "    " },
+      explain: "<code>range(1, " + (k + 1) + ")</code> gives i = 1 to " + k + " (the end value is never reached). Each pass adds <code>x * i</code> using the current x, and only then does x drop by 1."
+    };
+  }
+  function tCollatz() {
+    var N = pick([3, 5, 8, 10, 16, 20, 32, 64]), n = N, count = 0, rows = [];
+    while (n > 1) { if (n % 2 === 0) n = Math.floor(n / 2); else n = 3 * n + 1; count++; rows.push([n, count]); }
+    return {
+      id: "collatz", lines: ["n = " + N, "count = 0", "while n > 1:", "    if n % 2 == 0:", "        n = n // 2", "    else:", "        n = 3 * n + 1", "    count = count + 1", "print(count)"],
+      cols: ["n", "count"], start: [N, 0], rows: rows, output: py(count), note: LOOP_NOTE,
+      trace: { after: 7, indent: "    " },
+      explain: "<code>//</code> is integer division, so 10 // 2 is 5. The loop stops as soon as n is 1, so it runs " + count + " times."
+    };
+  }
+  function tMax() {
+    var nums;
+    do { nums = distinct(5, 1, 20); } while (nums.indexOf(Math.max.apply(null, nums)) === 0);
+    var best = nums[0], pos = 0, rows = [];
+    for (var i = 1; i < nums.length; i++) { if (nums[i] > best) { best = nums[i]; pos = i; } rows.push([i, nums[i], best, pos]); }
+    return {
+      id: "max", lines: ["nums = " + lit(nums), "best = nums[0]", "pos = 0", "for i in range(1, len(nums)):", "    if nums[i] > best:", "        best = nums[i]", "        pos = i", "print(best, pos)"],
+      cols: ["i", "nums[i]", "best", "pos"], start: ["—", "—", nums[0], 0], rows: rows, output: best + " " + pos, note: LOOP_NOTE,
+      trace: { after: 6, indent: "    " },
+      explain: "Lists start at index 0, so the loop checks indexes 1 to 4. best and pos only change when a bigger value turns up. <code>print(best, pos)</code> puts a space between the two values."
+    };
+  }
+  function tNested() {
+    var n = pick([3, 4]), s = "", rows = [];
+    for (var i = 0; i < n; i++) { for (var j = 0; j < i; j++) s = s + String(j); rows.push([i, s]); }
+    return {
+      id: "nested", lines: ["s = \"\"", "for i in range(" + n + "):", "    for j in range(i):", "        s = s + str(j)", "print(s)"],
+      cols: ["i", "s"], start: ["—", "\"\""], rows: rows, output: s,
+      note: "One row per pass of the <b>outer</b> loop. Write s at the end of that pass. Leave a cell blank (or type \"\") for an empty string.",
+      trace: { after: 3, indent: "    " },
+      explain: "When i is 0, <code>range(0)</code> is empty, so the inner loop does nothing. After that the inner loop runs i times, adding 0, 1, ... each time. The digits are joined as text, not added."
+    };
+  }
+  function tEvenOdd() {
+    var nums;
+    do { nums = []; for (var k = 0; k < 5; k++) nums.push(ri(1, 15)); } while (!nums.some(function (v) { return v % 2 === 0; }) || !nums.some(function (v) { return v % 2 === 1; }));
+    var evens = 0, odd = 0, rows = [];
+    nums.forEach(function (x) { if (x % 2 === 0) evens++; else odd += x; rows.push([x, evens, odd]); });
+    return {
+      id: "evenodd", lines: ["nums = " + lit(nums), "evens = 0", "odd_total = 0", "for x in nums:", "    if x % 2 == 0:", "        evens = evens + 1", "    else:", "        odd_total = odd_total + x", "print(evens, odd_total)"],
+      cols: ["x", "evens", "odd_total"], start: ["—", 0, 0], rows: rows, output: evens + " " + odd, note: LOOP_NOTE,
+      trace: { after: 7, indent: "    " },
+      explain: "<code>x % 2 == 0</code> is True for even numbers. evens <b>counts</b> the even values (+1 each), while odd_total <b>adds up</b> the odd values themselves."
+    };
+  }
+  function tEuclid() {
+    for (var k = 0; k < 200; k++) {
+      var g = ri(2, 6), mn = pick([[5, 3], [7, 4], [8, 5], [3, 2], [5, 2], [7, 3], [4, 3], [7, 5], [9, 4], [9, 7]]);
+      var A = g * mn[0], B = g * mn[1], a = A, b = B, rows = [];
+      while (b !== 0) { var r = a % b; a = b; b = r; rows.push([r, a, b]); }
+      if (rows.length > 6) continue;
+      return {
+        id: "euclid", lines: ["a = " + A, "b = " + B, "while b != 0:", "    r = a % b", "    a = b", "    b = r", "print(a)"],
+        cols: ["r", "a", "b"], start: ["—", A, B], rows: rows, output: py(a), note: LOOP_NOTE,
+        trace: { after: 5, indent: "    " },
+        explain: "<code>%</code> gives the remainder. Each pass shifts the values along: a takes b's value, and b takes the remainder. When b hits 0, a holds the greatest common divisor of " + A + " and " + B + ", which is " + a + "."
+      };
+    }
+  }
+  function tReverse() {
+    var word = pick(["ROBOT", "DEBUG", "BYTE", "LOOP", "CODE", "GEAR", "BOLT"]), rev = "", rows = [];
+    for (var i = 0; i < word.length; i++) { rev = word[i] + rev; rows.push([word[i], rev]); }
+    return {
+      id: "reverse", lines: ["word = \"" + word + "\"", "rev = \"\"", "for ch in word:", "    rev = ch + rev", "print(rev)"],
+      cols: ["ch", "rev"], start: ["—", "\"\""], rows: rows, output: rev, note: LOOP_NOTE + " No quotes needed.",
+      trace: { after: 3, indent: "    " },
+      explain: "<code>ch + rev</code> puts the new letter on the <b>front</b>, so the word builds up backwards. Writing <code>rev + ch</code> would just copy it."
+    };
+  }
+  function tBinary() {
+    var N = ri(5, 30), n = N, bits = "", rows = [];
+    while (n > 0) { bits = String(n % 2) + bits; n = Math.floor(n / 2); rows.push([bits, n]); }
+    return {
+      id: "binary", lines: ["n = " + N, "bits = \"\"", "while n > 0:", "    bits = str(n % 2) + bits", "    n = n // 2", "print(bits)"],
+      cols: ["bits", "n"], start: ["\"\"", N], rows: rows, output: bits, note: LOOP_NOTE,
+      trace: { after: 4, indent: "    " },
+      explain: "This converts " + N + " to binary. <code>n % 2</code> is the next bit (0 or 1), and it goes on the front of the string. <code>n // 2</code> halves n, rounding down. " + N + " in binary is " + bits + "."
+    };
+  }
+  function tSearch() {
+    var nums = distinct(5, 1, 20), present = Math.random() < 0.7, target, p = -1;
+    if (present) { p = ri(1, 4); target = nums[p]; } else { do { target = ri(1, 20); } while (nums.indexOf(target) >= 0); }
+    var i = 0, found = false, rows = [];
+    while (i < nums.length && !found) { if (nums[i] === target) found = true; else i = i + 1; rows.push([i, found]); }
+    return {
+      id: "search", lines: ["nums = " + lit(nums), "target = " + target, "i = 0", "found = False", "while i < len(nums) and not found:", "    if nums[i] == target:", "        found = True", "    else:", "        i = i + 1", "print(found, i)"],
+      cols: ["i", "found"], start: [0, "False"], rows: rows, output: py(found) + " " + i, note: LOOP_NOTE + " Write booleans as True or False.",
+      trace: { after: 8, indent: "    " },
+      explain: present
+        ? "Linear search checks one index at a time. When <code>nums[i] == target</code>, found becomes True and i stops moving, so the loop ends with i = " + i + "."
+        : target + " isn't in the list, so i keeps climbing until <code>i < len(nums)</code> is False at i = 5. found never changes."
+    };
+  }
+  function tGrid() {
+    var g = [], k, anti = Math.random() < 0.5;
+    for (k = 0; k < 3; k++) g.push([ri(1, 9), ri(1, 9), ri(1, 9)]);
+    var total = 0, rows = [], expr = anti ? "grid[r][2 - r]" : "grid[r][r]";
+    for (var r = 0; r < 3; r++) { var v = anti ? g[r][2 - r] : g[r][r]; total += v; rows.push([r, v, total]); }
+    return {
+      id: "grid", lines: ["grid = [" + lit(g[0]) + ",", "        " + lit(g[1]) + ",", "        " + lit(g[2]) + "]", "total = 0", "for r in range(3):", "    total = total + " + expr, "print(total)"],
+      cols: ["r", expr, "total"], start: ["—", "—", 0], rows: rows, output: py(total), note: LOOP_NOTE,
+      trace: { after: 5, indent: "    " },
+      explain: "<code>grid[r]</code> picks the row and the second index picks the column, both starting from 0. " + (anti ? "<code>2 - r</code> runs 2, 1, 0, so this walks the diagonal from top-right to bottom-left." : "Using r twice walks the main diagonal from top-left to bottom-right.")
+    };
+  }
+  function tBubble() {
+    var nums;
+    do { nums = distinct(5, 1, 9); } while (nums.every(function (v, i) { return i === 0 || nums[i - 1] < v; }));
+    var a = nums.slice(), rows = [];
+    for (var i = 0; i < a.length - 1; i++) { if (a[i] > a[i + 1]) { var t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; } rows.push([i, a.slice()]); }
+    return {
+      id: "bubble", lines: ["nums = " + lit(nums), "for i in range(len(nums) - 1):", "    if nums[i] > nums[i + 1]:", "        nums[i], nums[i + 1] = nums[i + 1], nums[i]", "print(nums)"],
+      cols: ["i", "nums"], start: ["—", py(nums)], rows: rows, output: py(a), note: LOOP_NOTE + " Write the whole list, like [3, 1, 4, 5, 2].",
+      trace: { after: 3, indent: "    " },
+      explain: "This is <b>one pass</b> of bubble sort. Neighbours swap when the left one is bigger, so the largest value bubbles to the end. One pass isn't always enough to sort the whole list."
+    };
+  }
+  // HL: recursion. One row per call, in call order.
+  function tDigits() {
+    var N = ri(102, 987), rows = [], n = N, rets = [];
+    var ns = []; while (true) { ns.push(n); if (n === 0) break; n = Math.floor(n / 10); }
+    var acc = 0; for (var k = ns.length - 1; k >= 0; k--) { acc = ns[k] === 0 ? 0 : ns[k] % 10 + acc; rets[k] = acc; }
+    ns.forEach(function (v, k) { rows.push([v, v === 0 ? null : v % 10, rets[k]]); });
+    return {
+      id: "digits", lines: ["def mystery(n):", "    if n == 0:", "        return 0", "    return n % 10 + mystery(n // 10)", "", "print(mystery(" + N + "))"],
+      cols: ["call: n", "n % 10", "returns"], start: null, rows: rows, output: py(rets[0]),
+      note: "One row per call to <b>mystery</b>, in the order the calls start. “returns” is the value that call hands back once the calls below it finish.",
+      trace: null,
+      explain: "Each call peels off the last digit (<code>n % 10</code>) and calls itself on the rest (<code>n // 10</code>). The base case <code>n == 0</code> returns 0, then the answers add up on the way back: it's the digit sum of " + N + "."
+    };
+  }
+  function tPower() {
+    var b = pick([2, 3]), e = b === 2 ? ri(3, 5) : ri(3, 4), rows = [];
+    for (var k = e; k >= 0; k--) rows.push([k, Math.pow(b, k)]);
+    return {
+      id: "power", lines: ["def power(b, e):", "    if e == 0:", "        return 1", "    return b * power(b, e - 1)", "", "print(power(" + b + ", " + e + "))"],
+      cols: ["call: e", "returns"], start: null, rows: rows, output: py(Math.pow(b, e)),
+      note: "One row per call to <b>power</b>, in the order the calls start. “returns” is the value that call hands back.",
+      trace: null,
+      explain: "Each call waits on <code>power(b, e - 1)</code> until e reaches the base case 0, which returns 1. Then each call multiplies by " + b + " on the way back up, giving " + b + "<sup>" + e + "</sup> = " + Math.pow(b, e) + "."
+    };
+  }
+
+  var EASY = [tAccum, tMax, tEvenOdd, tReverse];
+  var MORE = [tCollatz, tNested, tEuclid, tBinary, tSearch, tGrid, tBubble];
+  var lastId = null;
+  function make(level, hl) {
+    var pool = level <= 1 ? EASY.slice() : EASY.concat(MORE, MORE);
+    if (hl) { pool.push(tPower); if (level >= 2) pool.push(tDigits, tDigits, tPower); }
+    var t; do { t = pick(pool)(); } while (t.id === lastId && pool.length > 1);
+    lastId = t.id;
+    t.rows = t.rows.map(function (r) { return r.map(py); });
+    if (t.start) t.start = t.start.map(function (v) { return typeof v === "string" ? v : py(v); });
+    return t;
+  }
+  function norm(s) {
+    return String(s).replace(/["']/g, "").replace(/\s+/g, " ").trim()
+      .replace(/\s*,\s*/g, ", ").replace(/\[\s*/g, "[").replace(/\s*\]/g, "]").toLowerCase();
+  }
+  return { make: make, norm: norm, all: { tAccum: tAccum, tCollatz: tCollatz, tMax: tMax, tNested: tNested, tEvenOdd: tEvenOdd, tEuclid: tEuclid, tReverse: tReverse, tBinary: tBinary, tSearch: tSearch, tGrid: tGrid, tBubble: tBubble, tDigits: tDigits, tPower: tPower }, py: py };
+})();
+</script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $("cv"), ctx = cv.getContext("2d");
+  var C = { desk: "#22305f", desk2: "#18234a", win: "#c9c3b5", hi: "#f3eee2", lo: "#6c665a", ink: "#15120e", zap: "#ffd23f", bug: "#e2457a", armor: "#7a2448", gold: "#ffb12a", term: "#0f1526", rust: "#c8512a", metal: "#aeb6c1", metalDark: "#6b7482", dead: "#4b4f5c" };
+  var PARTS = [{ key: "antenna", name: "antenna" }, { key: "eyes", name: "eye screen" }, { key: "arms", name: "arms" }, { key: "core", name: "power core" }, { key: "legs", name: "legs" }];
+  var ROUND = 20;
+  var reduceMotion = false; try { reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+  function loadBest() { try { return +localStorage.getItem("db_best") || 0; } catch (e) { return 0; } }
+  function saveBest(v) { try { localStorage.setItem("db_best", String(v)); } catch (e) {} }
+
+  // ---- sound ----
+  var actx = null, muted = false;
+  function beep(freq, dur, type, vol) {
+    if (muted) return;
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || "square"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.035, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+  $("muteBtn").onclick = function () { muted = !muted; this.textContent = "Sound: " + (muted ? "off" : "on"); };
+
+  // ---- villain ----
+  var GLITCH_SVG = '<svg width="46" height="46" viewBox="0 0 48 48" aria-hidden="true">' +
+    '<rect x="8" y="10" width="32" height="28" fill="#e2457a"/><rect x="4" y="16" width="6" height="12" fill="#e2457a"/><rect x="38" y="20" width="6" height="10" fill="#e2457a"/>' +
+    '<rect x="12" y="38" width="6" height="6" fill="#e2457a"/><rect x="30" y="38" width="6" height="6" fill="#e2457a"/><rect x="20" y="4" width="8" height="6" fill="#e2457a"/>' +
+    '<rect x="14" y="18" width="7" height="7" fill="#15120e"/><rect x="27" y="18" width="7" height="7" fill="#15120e"/><rect x="16" y="20" width="3" height="3" fill="#ffd23f"/><rect x="29" y="20" width="3" height="3" fill="#ffd23f"/>' +
+    '<rect x="16" y="30" width="16" height="3" fill="#15120e"/><rect x="18" y="33" width="3" height="3" fill="#15120e"/><rect x="27" y="33" width="3" height="3" fill="#15120e"/></svg>';
+  function villain(el, msg) { $(el).innerHTML = GLITCH_SVG + "<p><b>glitch.exe&gt;</b> " + msg + "</p>"; }
+  function pickOne(a) { return a[Math.floor(Math.random() * a.length)]; }
+  var T_BREAK = ["I scrambled the code in Bolt's {p}. Trace it if you can.", "Oops! I chewed through the {p}. Bet you can't follow the loop.", "The {p} is mine now. Every line counts.", "Bzzt. I rewired the {p}. Off by one? I hope so."];
+  var T_WIN = ["Ugh. You actually traced it.", "Lucky. Next time I'm using nested loops.", "Fine, keep your robot."];
+  var T_LOSE = ["Ha! Sparks everywhere.", "Close isn't the same as correct.", "That's what happens when you skip a line."];
+  villain("titleVillain", "I'm The Glitch. I crawl into code and break things, and your robot pal Bolt is my favourite chew toy. My bugs are already on your desktop.");
+
+  // ---- mode ----
+  var HL = false;
+  function setMode(h) { HL = h; $("slBtn").setAttribute("aria-pressed", String(!h)); $("hlBtn").setAttribute("aria-pressed", String(h)); $("modeNote").textContent = h ? "Everything in SL, plus recursion." : "Loops, conditionals, strings and lists."; }
+  $("slBtn").onclick = function () { setMode(false); }; $("hlBtn").onclick = function () { setMode(true); };
+
+  // ---- upgrades ----
+  var UPG = [
+    { id: "zap", name: "Auto-Zapper", max: 5, cost: [15, 35, 70, 120, 200],
+      desc: function (l) { return l === 0 ? "Bolt zaps the nearest bug on his own." : "Next: zaps every " + ZAP_CD[l + 1] + "s with more range."; } },
+    { id: "chain", name: "Chain Lightning", max: 3, cost: [50, 110, 200], needs: "zap",
+      desc: function (l) { return "Each zap jumps to " + (l + 1) + " more bug" + (l ? "s" : "") + "."; } },
+    { id: "swat", name: "Big Swatter", max: 3, cost: [20, 50, 110],
+      desc: function (l) { return "Clicks squash every bug in a " + ["small", "wider", "big", "huge"][Math.min(3, l + 1)] + " circle."; } },
+    { id: "wall", name: "Firewall", max: 3, cost: [25, 60, 130],
+      desc: function (l) { return "Blocks " + WALL[Math.min(3, l + 1)] + " bug hits each round."; } },
+    { id: "dbl", name: "Byte Doubler", max: 3, cost: [40, 100, 220],
+      desc: function (l) { return "Bugs drop " + DBL[Math.min(3, l + 1)] + "× bytes."; } },
+    { id: "farm", name: "Byte Miner", max: 3, cost: [30, 75, 160],
+      desc: function (l) { return "Bolt mines +" + FARM[Math.min(3, l + 1)] + " B every second while bugs attack."; } },
+    { id: "emp", name: "EMP Blast", max: 3, cost: [80, 140, 240],
+      desc: function (l) { return l === 0 ? "Space bar wipes out every bug on screen." : "Next: recharges in " + EMP_CD[l + 1] + "s."; } }
+  ];
+  var ZAP_CD = [0, 1.4, 1.05, 0.8, 0.6, 0.45], ZAP_RANGE = [0, 0.34, 0.42, 0.5, 0.58, 0.68];
+  var SWAT = [0, 0.06, 0.09, 0.13], WALL = [0, 2, 4, 7], DBL = [1, 1.5, 2, 3], FARM = [0, 0.5, 1, 2], EMP_CD = [0, 22, 16, 11];
+
+  // ---- state ----
+  var S;
+  function newRun() {
+    S = { phase: "title", level: 1, score: 0, battery: 100, fixed: [false, false, false, false, false], broken: -1,
+      bugs: [], fx: [], zaps: [], rings: [], t: ROUND, spawnT: 0.6, combo: 0, comboT: 0, squashed: 0, perfect: 0, repairs: 0,
+      jolt: 0, dance: 0, bytes: 0, up: { zap: 0, chain: 0, swat: 0, wall: 0, dbl: 0, farm: 0, emp: 0 }, zapT: 1, wall: 0, empCd: 0,
+      glitch: { x: 0.3, y: 0.12, tx: 0.6 } };
+  }
+
+  // ---- canvas sizing ----
+  var dpr = 1, Wc = 0, Hc = 0, U = 1, playW = 0, narrow = false, deskPattern = null;
+  function resize() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    var r = cv.getBoundingClientRect();
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+    Wc = cv.width; Hc = cv.height;
+    narrow = window.innerWidth <= 820;
+    var shop = $("shop");
+    playW = (!shop.hidden && !narrow) ? Wc - (shop.getBoundingClientRect().width + 24) * dpr : Wc;
+    U = Math.min(playW, Hc);
+    // dithered desktop pattern
+    var p = document.createElement("canvas"); p.width = p.height = 4 * dpr;
+    var pc = p.getContext("2d"); pc.fillStyle = C.desk; pc.fillRect(0, 0, p.width, p.height);
+    pc.fillStyle = C.desk2; pc.fillRect(0, 0, dpr, dpr); pc.fillRect(2 * dpr, 2 * dpr, dpr, dpr);
+    deskPattern = ctx.createPattern(p, "repeat");
+  }
+  window.addEventListener("resize", resize);
+  function robotCenter() { return { x: playW / 2, y: Hc * (narrow ? 0.4 : 0.52) }; }
+
+  // ---- shop ----
+  function cost(u) { return u.cost[S.up[u.id]]; }
+  function renderShop() {
+    var html = "";
+    UPG.forEach(function (u) {
+      var l = S.up[u.id], maxed = l >= u.max, locked = u.needs && S.up[u.needs] === 0;
+      var pips = ""; for (var i = 0; i < u.max; i++) pips += i < l ? "■" : "□";
+      html += '<div class="up' + (locked ? " locked" : "") + '"><span class="nm">' + u.name + '</span>' +
+        '<button class="btn" type="button" data-up="' + u.id + '">' + (maxed ? "Max" : cost(u) + " B") + "</button>" +
+        '<span class="pips">' + pips + '</span><span class="ds">' + (locked ? "Needs an Auto-Zapper first." : maxed ? "Fully upgraded." : u.desc(l)) + "</span></div>";
+    });
+    if (S.up.emp > 0) html += '<button class="btn primary" type="button" id="empBtn">EMP (Space)</button>';
+    $("shopList").innerHTML = html;
+    $("shopList").querySelectorAll("[data-up]").forEach(function (b) { b.onclick = function () { buy(b.getAttribute("data-up")); }; });
+    if ($("empBtn")) $("empBtn").onclick = fireEmp;
+    updateShop();
+  }
+  function updateShop() {
+    $("bytes").textContent = Math.floor(S.bytes);
+    $("bps").textContent = FARM[S.up.farm] ? "+" + FARM[S.up.farm] + " B/s" : "";
+    $("shopList").querySelectorAll("[data-up]").forEach(function (b) {
+      var u = UPG.find(function (x) { return x.id === b.getAttribute("data-up"); });
+      var l = S.up[u.id], locked = u.needs && S.up[u.needs] === 0;
+      b.disabled = l >= u.max || locked || S.bytes < cost(u) || S.phase !== "squash";
+    });
+    var e = $("empBtn");
+    if (e) { e.disabled = S.empCd > 0 || S.phase !== "squash"; e.textContent = S.empCd > 0 ? "EMP recharging " + Math.ceil(S.empCd) + "s" : "EMP ready (Space)"; }
+  }
+  function buy(id) {
+    var u = UPG.find(function (x) { return x.id === id; });
+    if (S.phase !== "squash" || S.up[id] >= u.max || S.bytes < cost(u)) return;
+    if (u.needs && S.up[u.needs] === 0) return;
+    S.bytes -= cost(u); S.up[id]++;
+    if (id === "wall") S.wall = Math.max(S.wall, WALL[S.up.wall]);
+    if (id === "zap") S.zapT = 0.3;
+    beep(780, 0.08, "square", 0.035); setTimeout(function () { beep(1170, 0.1, "square", 0.03); }, 80);
+    toast(u.name + " upgraded!");
+    renderShop();
+  }
+  $("shopToggle").onclick = function () { $("shop").classList.toggle("collapsed"); };
+
+  // ---- input ----
+  var hover = null;
+  cv.addEventListener("pointermove", function (e) { var r = cv.getBoundingClientRect(); hover = { x: (e.clientX - r.left) * dpr, y: (e.clientY - r.top) * dpr }; });
+  cv.addEventListener("pointerleave", function () { hover = null; });
+  cv.addEventListener("pointerdown", function (e) {
+    if (!S || S.phase !== "squash") return;
+    var r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * dpr, py = (e.clientY - r.top) * dpr;
+    var R0 = SWAT[S.up.swat] * U, hits = [];
+    if (S.up.swat > 0) { S.bugs.forEach(function (b, i) { if (Math.hypot(b.x - px, b.y - py) < R0 + b.r) hits.push(i); }); S.rings.push({ x: px, y: py, r: R0 * 0.3, to: R0, t: 0.25, c: C.hi }); }
+    else { var best = -1, bd = 1e9; S.bugs.forEach(function (b, i) { var d = Math.hypot(b.x - px, b.y - py); if (d < b.r * 1.6 && d < bd) { bd = d; best = i; } }); if (best >= 0) hits.push(best); }
+    if (!hits.length) return;
+    S.combo = Math.min(10, S.combo + 1); S.comboT = 1.1;
+    hits.sort(function (a, b) { return b - a; }).forEach(function (i) { damage(i, 1, "click"); });
+    beep(420 + S.combo * 60, 0.06, "square", 0.03);
+  });
+  window.addEventListener("keydown", function (e) { if (e.key === " " && S && S.phase === "squash") { e.preventDefault(); fireEmp(); } });
+
+  function damage(i, d, src) {
+    var b = S.bugs[i]; if (!b) return;
+    b.hp -= d; b.hurt = 0.15;
+    if (b.hp > 0) return;
+    var by = (b.gold ? 15 : src === "click" ? 2 : 1) * DBL[S.up.dbl];
+    var pts = (b.gold ? 50 : 10) * (src === "click" ? Math.max(1, S.combo) : 1);
+    S.bytes += by; S.score += pts; S.squashed++;
+    for (var k = 0; k < 7; k++) S.fx.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * U * 0.6, vy: (Math.random() - 0.5) * U * 0.6, t: 0.45, c: b.gold ? C.gold : C.bug, s: U * 0.012 });
+    S.fx.push({ x: b.x, y: b.y - b.r, vx: 0, vy: -U * 0.09, t: 0.8, txt: "+" + (by % 1 ? by.toFixed(1) : by) + " B" });
+    S.bugs.splice(i, 1);
+  }
+  function fireEmp() {
+    if (S.phase !== "squash" || S.up.emp === 0 || S.empCd > 0) return;
+    S.empCd = EMP_CD[S.up.emp];
+    var c = robotCenter();
+    S.rings.push({ x: c.x, y: c.y, r: U * 0.1, to: Math.max(playW, Hc) * 1.1, t: 0.6, c: C.zap, w: 6 });
+    for (var i = S.bugs.length - 1; i >= 0; i--) damage(i, 3, "zap");
+    beep(90, 0.5, "sawtooth", 0.05); setTimeout(function () { beep(60, 0.4, "square", 0.04); }, 60);
+    updateShop();
+  }
+
+  function spawnBug() {
+    var x, y, m = U * 0.05;
+    if (Math.random() < 0.3) { x = S.glitch.x * playW; y = S.glitch.y * Hc + U * 0.04; }
+    else {
+      var side = Math.floor(Math.random() * 4);
+      if (side === 0) { x = -m; y = Math.random() * Hc; } else if (side === 1) { x = playW + m; y = Math.random() * Hc; }
+      else if (side === 2) { x = Math.random() * playW; y = -m; } else { x = Math.random() * playW; y = Hc + m; }
+    }
+    var gold = Math.random() < 0.06, armored = !gold && S.level >= 2 && Math.random() < 0.22, fast = !gold && !armored && S.level >= 2 && Math.random() < 0.25;
+    var sp = U * (0.07 + 0.016 * S.level) * (gold ? 1.5 : fast ? 1.45 : armored ? 0.75 : 1) * (0.85 + Math.random() * 0.3);
+    S.bugs.push({ x: x, y: y, r: Math.max(15 * dpr, U * (fast ? 0.027 : armored ? 0.042 : 0.035)), sp: sp, gold: gold, armored: armored, hp: armored ? 3 : 1, maxHp: armored ? 3 : 1, ph: Math.random() * 6.28, hurt: 0 });
+  }
+
+  // ---- loop ----
+  var last = 0, toastT = 0;
+  function toast(m) { var t = $("toast"); t.textContent = m; t.hidden = false; toastT = 2.4; }
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
+    if (S) update(dt);
+    if (toastT > 0) { toastT -= dt; if (toastT <= 0) $("toast").hidden = true; }
+    draw(ts / 1000);
+    requestAnimationFrame(frame);
+  }
+  function zapTick(dt) {
+    if (!S.up.zap) return;
+    S.zapT -= dt; if (S.zapT > 0) return;
+    var c = robotCenter(), head = { x: c.x, y: c.y - U * 0.17 }, range = ZAP_RANGE[S.up.zap] * U;
+    var first = -1, fd = 1e9;
+    S.bugs.forEach(function (b, i) { var d = Math.hypot(b.x - c.x, b.y - c.y); if (d < range && d < fd) { fd = d; first = i; } });
+    if (first < 0) { S.zapT = 0.1; return; }
+    var path = [head], hit = [first], cur = S.bugs[first];
+    path.push({ x: cur.x, y: cur.y });
+    for (var j = 0; j < S.up.chain; j++) {
+      var nx = -1, nd = U * 0.22;
+      S.bugs.forEach(function (b, i) { if (hit.indexOf(i) >= 0) return; var d = Math.hypot(b.x - cur.x, b.y - cur.y); if (d < nd) { nd = d; nx = i; } });
+      if (nx < 0) break; hit.push(nx); cur = S.bugs[nx]; path.push({ x: cur.x, y: cur.y });
+    }
+    S.zaps.push({ pts: path, t: 0.18 });
+    hit.sort(function (a, b) { return b - a; }).forEach(function (i) { damage(i, 1, "zap"); });
+    S.zapT = ZAP_CD[S.up.zap];
+    beep(1400 + Math.random() * 300, 0.04, "sawtooth", 0.015);
+  }
+  function update(dt) {
+    S.jolt = Math.max(0, S.jolt - dt);
+    for (var s = S.fx.length - 1; s >= 0; s--) { var p = S.fx[s]; p.t -= dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.t <= 0) S.fx.splice(s, 1); }
+    for (var z = S.zaps.length - 1; z >= 0; z--) { S.zaps[z].t -= dt; if (S.zaps[z].t <= 0) S.zaps.splice(z, 1); }
+    for (var q = S.rings.length - 1; q >= 0; q--) { S.rings[q].t -= dt; if (S.rings[q].t <= 0) S.rings.splice(q, 1); }
+    if (S.phase === "dance") { S.dance -= dt; if (S.dance <= 0) showLevelDone(); return; }
+    if (S.phase !== "squash") return;
+    S.t -= dt; S.empCd = Math.max(0, S.empCd - dt);
+    S.bytes += FARM[S.up.farm] * dt;
+    S.comboT -= dt; if (S.comboT <= 0) S.combo = 0;
+    // the Glitch wanders along the top and drops bugs
+    var g = S.glitch; g.x += (g.tx - g.x) * Math.min(1, dt * 0.8); if (Math.abs(g.tx - g.x) < 0.02) g.tx = 0.1 + Math.random() * 0.8;
+    // spawns get busier as Bolt gets stronger, so upgrades never make it boring
+    var power = S.up.zap + S.up.chain + S.up.swat + S.up.emp;
+    S.spawnT -= dt;
+    if (S.spawnT <= 0) {
+      spawnBug(); if (Math.random() < Math.min(0.7, 0.08 * power + (S.level >= 3 ? 0.25 : 0))) spawnBug();
+      S.spawnT = Math.max(0.2, 0.9 - 0.1 * S.level) * (0.7 + Math.random() * 0.6);
+    }
+    zapTick(dt);
+    var c = robotCenter(), hitR = U * 0.13;
+    for (var i = S.bugs.length - 1; i >= 0; i--) {
+      var b = S.bugs[i]; b.ph += dt * 14; b.hurt = Math.max(0, b.hurt - dt);
+      var dx = c.x - b.x, dy = c.y - b.y, L = Math.hypot(dx, dy) || 1, wob = Math.sin(b.ph * 0.4) * 0.4;
+      b.x += (dx / L - dy / L * wob) * b.sp * dt; b.y += (dy / L + dx / L * wob) * b.sp * dt; b.ang = Math.atan2(dy, dx);
+      if (L < hitR) {
+        S.bugs.splice(i, 1);
+        if (b.gold) continue;
+        if (S.wall > 0) { S.wall--; S.rings.push({ x: c.x, y: c.y, r: U * 0.14, to: U * 0.2, t: 0.3, c: C.zap }); beep(900, 0.06, "triangle", 0.03); continue; }
+        S.battery -= 5; S.jolt = 0.35; S.combo = 0; beep(140, 0.18, "sawtooth", 0.04);
+        if (S.battery <= 0) { hud(); return gameOver(); }
+      }
+    }
+    if (S.t <= 0) { S.bugs = []; S.zaps = []; startRepair(); }
+    hud();
+  }
+  var shopTick = 0;
+  function hud() {
+    $("hLevel").textContent = S.level; $("hScore").textContent = S.score;
+    $("battFill").style.width = Math.max(0, S.battery) + "%";
+    $("battFill").style.background = S.battery < 30 ? C.bug : C.zap;
+    $("hParts").textContent = S.fixed.filter(Boolean).length + "/5";
+    $("hTime").textContent = S.phase === "squash" ? Math.max(0, Math.ceil(S.t)) + "s" : "—";
+    if (++shopTick % 6 === 0 || S.phase !== "squash") updateShop();
+  }
+
+  // ---- drawing ----
+  function pix(x, y, s, rows, col) { ctx.fillStyle = col; rows.forEach(function (r, j) { for (var i = 0; i < r.length; i++) if (r[i] === "#") ctx.fillRect(x + i * s, y + j * s, s, s); }); }
+  function drawIcons() {
+    var s = 3 * dpr, x = 34 * dpr, y = 16 * dpr;
+    ctx.font = (12 * dpr) + "px Silkscreen, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    // my_code.py
+    pix(x, y, s, ["#######.", "#.....##", "#.##.#.#", "#.....##", "#.###..#", "#......#", "#.##.#.#", "########"], C.hi);
+    ctx.fillStyle = C.hi; ctx.fillText("my_code.py", x + 4 * s, y + 9 * s);
+    // recycle bin with squash count
+    var y2 = y + 18 * s;
+    pix(x, y2, s, ["..####..", "########", ".#.##.#.", ".#.##.#.", ".#.##.#.", ".#.##.#.", ".######."], C.hi);
+    ctx.fillStyle = C.hi; ctx.fillText("Bin (" + (S ? S.squashed : 0) + ")", x + 4 * s, y2 + 8 * s);
+  }
+  function draw(time) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = deskPattern || C.desk; ctx.fillRect(0, 0, Wc, Hc);
+    drawIcons();
+    if (!S) return;
+    // zapper range hint
+    var c = robotCenter();
+    if (S.up.zap && S.phase === "squash") { ctx.strokeStyle = "rgba(255,210,63,0.16)"; ctx.setLineDash([6 * dpr, 8 * dpr]); ctx.lineWidth = 2 * dpr; ctx.beginPath(); ctx.arc(c.x, c.y, ZAP_RANGE[S.up.zap] * U, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+    drawRobot(time);
+    if (S.phase === "squash" || S.phase === "title") drawGlitch(time);
+    S.bugs.forEach(function (b) { drawBug(b); });
+    // lightning
+    S.zaps.forEach(function (z) {
+      ctx.globalAlpha = Math.min(1, z.t / 0.18); ctx.strokeStyle = C.zap; ctx.lineWidth = 3 * dpr; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(z.pts[0].x, z.pts[0].y);
+      for (var k = 1; k < z.pts.length; k++) {
+        var a = z.pts[k - 1], b = z.pts[k], segs = 5;
+        for (var j = 1; j <= segs; j++) { var f = j / segs, jx = j < segs ? (Math.random() - 0.5) * U * 0.03 : 0, jy = j < segs ? (Math.random() - 0.5) * U * 0.03 : 0; ctx.lineTo(a.x + (b.x - a.x) * f + jx, a.y + (b.y - a.y) * f + jy); }
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    });
+    S.rings.forEach(function (r) {
+      var f = 1 - r.t / (r.to > U ? 0.6 : 0.3); ctx.globalAlpha = Math.max(0, 1 - f); ctx.strokeStyle = r.c; ctx.lineWidth = (r.w || 3) * dpr;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r + (r.to - r.r) * Math.min(1, f), 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
+    });
+    S.fx.forEach(function (p) {
+      ctx.globalAlpha = Math.min(1, p.t * 2);
+      if (p.txt) { ctx.fillStyle = C.zap; ctx.font = "700 " + (15 * dpr) + "px 'Pixelify Sans', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(p.txt, p.x, p.y); }
+      else { ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
+      ctx.globalAlpha = 1;
+    });
+    if (S.phase === "squash") {
+      if (S.combo > 1) { ctx.fillStyle = C.zap; ctx.font = "700 " + (22 * dpr) + "px 'Pixelify Sans', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText("COMBO x" + S.combo, playW / 2, 14 * dpr); }
+      if (hover && S.up.swat) { ctx.strokeStyle = "rgba(243,238,226,0.5)"; ctx.lineWidth = 2 * dpr; ctx.setLineDash([4 * dpr, 4 * dpr]); ctx.beginPath(); ctx.arc(hover.x, hover.y, SWAT[S.up.swat] * U, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+    }
+  }
+  function drawBug(b) {
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate((b.ang || 0) + Math.PI / 2);
+    var r = b.r, s = Math.max(2, Math.round(r / 4)), leg = Math.sin(b.ph) > 0 ? s : 0;
+    var body = b.gold ? C.gold : b.armored ? C.armor : C.bug;
+    if (b.hurt > 0) body = C.hi;
+    ctx.fillStyle = C.ink;
+    // pixel legs
+    for (var k = -1; k <= 1; k++) { ctx.fillRect(-r - s + (k === 0 ? leg : -leg) * 0.5, k * s * 2, s * 1.5, s); ctx.fillRect(r - s * 0.5 - (k === 0 ? leg : -leg) * 0.5, k * s * 2, s * 1.5, s); }
+    ctx.fillStyle = body; ctx.fillRect(-r * 0.75, -r * 0.55, r * 1.5, r * 1.6);
+    ctx.fillStyle = C.ink; ctx.fillRect(-r * 0.75, -r * 0.55, r * 1.5, s * 0.6); ctx.fillRect(-s * 0.3, -r * 0.55, s * 0.6, r * 1.6);
+    ctx.fillRect(-r * 0.5, -r * 1.05, r, r * 0.55);
+    ctx.fillStyle = C.zap; ctx.fillRect(-r * 0.38, -r * 0.95, s, s); ctx.fillRect(r * 0.38 - s, -r * 0.95, s, s);
+    if (b.armored) { ctx.fillStyle = C.metalDark; ctx.fillRect(-r * 0.75, r * 0.25, r * 1.5, s); ctx.fillRect(-r * 0.75, -r * 0.1, r * 1.5, s); }
+    ctx.restore();
+    if (b.maxHp > 1) { ctx.fillStyle = C.ink; ctx.fillRect(b.x - r, b.y - r * 1.7, r * 2, 4 * dpr); ctx.fillStyle = C.zap; ctx.fillRect(b.x - r, b.y - r * 1.7, r * 2 * b.hp / b.maxHp, 4 * dpr); }
+  }
+  function drawGlitch(t) {
+    var x = S.glitch.x * playW, y = S.glitch.y * Hc, s = Math.max(3 * dpr, U * 0.011), j = reduceMotion ? 0 : (Math.sin(t * 9) > 0.6 ? s : 0);
+    pix(x - 3 * s + j, y - 3 * s, s, ["..##..", ".####.", "######", "#.##.#", "######", ".#..#.", "#....#"], C.bug);
+    ctx.fillStyle = C.zap; ctx.fillRect(x - 2 * s + j, y, s, s); ctx.fillRect(x + s + j, y, s, s);
+  }
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function drawRobot(t) {
+    var c = robotCenter(), u = U * 0.11;
+    var bob = reduceMotion ? 0 : Math.sin(t * 2.2) * u * 0.04;
+    var dance = S.phase === "dance";
+    if (dance && !reduceMotion) bob = Math.abs(Math.sin(t * 8)) * -u * 0.35;
+    var jx = S.jolt > 0 && !reduceMotion ? (Math.random() - 0.5) * u * 0.12 : 0;
+    var cx = c.x + jx, cy = c.y + bob;
+    function broken(k) { if (S.phase === "title") return false; var i = PARTS.findIndex(function (p) { return p.key === k; }); return !S.fixed[i]; }
+    ctx.lineWidth = 3 * dpr; ctx.strokeStyle = C.ink; ctx.lineJoin = "round";
+    // firewall ring
+    if (S.wall > 0 && S.phase === "squash") {
+      ctx.strokeStyle = C.rust; ctx.lineWidth = 4 * dpr; ctx.setLineDash([10 * dpr, 6 * dpr]);
+      ctx.beginPath(); ctx.arc(cx, cy, U * 0.14, t * 0.6, t * 0.6 + 6.28); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = C.rust; ctx.font = (11 * dpr) + "px Silkscreen, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText("FIREWALL " + S.wall, cx, cy + U * 0.2);
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 3 * dpr;
+    }
+    var legSwing = dance && !reduceMotion ? Math.sin(t * 8) * u * 0.15 : 0;
+    [-1, 1].forEach(function (s) {
+      var bk = broken("legs");
+      ctx.fillStyle = bk ? C.dead : C.metalDark;
+      var lx = cx + s * u * 0.35 + (bk && s > 0 ? u * 0.1 : 0), ly = cy + u * 0.95, lh = u * 0.6 + s * legSwing;
+      ctx.fillRect(lx - u * 0.13, ly, u * 0.26, lh); ctx.strokeRect(lx - u * 0.13, ly, u * 0.26, lh);
+      ctx.fillStyle = bk ? C.dead : C.rust; ctx.fillRect(lx - u * 0.24, ly + lh, u * 0.48, u * 0.16); ctx.strokeRect(lx - u * 0.24, ly + lh, u * 0.48, u * 0.16);
+    });
+    [-1, 1].forEach(function (s) {
+      var bk = broken("arms");
+      ctx.save(); ctx.translate(cx + s * u * 0.82, cy + u * 0.2);
+      ctx.rotate(bk ? s * 0.25 + (s > 0 ? 0.9 : 0) : dance && !reduceMotion ? s * (-2.2 + Math.sin(t * 8 + s) * 0.5) : s * 0.18);
+      ctx.fillStyle = bk ? C.dead : C.metalDark; ctx.fillRect(-u * 0.11, 0, u * 0.22, u * 0.75); ctx.strokeRect(-u * 0.11, 0, u * 0.22, u * 0.75);
+      ctx.fillStyle = bk ? C.dead : C.rust; ctx.fillRect(-u * 0.17, u * 0.72, u * 0.34, u * 0.22); ctx.strokeRect(-u * 0.17, u * 0.72, u * 0.34, u * 0.22);
+      ctx.restore();
+    });
+    // body: chunky CRT-era tower
+    ctx.fillStyle = C.metal; rr(cx - u * 0.7, cy - u * 0.05, u * 1.4, u * 1.05, u * 0.06); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.metalDark; for (var v = 0; v < 3; v++) ctx.fillRect(cx - u * 0.55, cy + u * (0.08 + v * 0.08), u * 0.3, u * 0.03);
+    var coreOk = !broken("core");
+    ctx.fillStyle = coreOk ? C.zap : C.dead; ctx.fillRect(cx - u * 0.1, cy + u * 0.3, u * 0.42, u * 0.3); ctx.strokeRect(cx - u * 0.1, cy + u * 0.3, u * 0.42, u * 0.3);
+    if (coreOk) { ctx.fillStyle = C.ink; ctx.font = "700 " + Math.round(u * 0.2) + "px 'Fira Code', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("01", cx + u * 0.11, cy + u * 0.46); }
+    // byte miner dish
+    if (S.up.farm) { ctx.fillStyle = C.metalDark; ctx.beginPath(); ctx.arc(cx - u * 0.75, cy + u * 0.1, u * 0.18, Math.PI * 0.5, Math.PI * 1.5); ctx.fill(); ctx.stroke(); }
+    // battery strip
+    ctx.fillStyle = C.ink; ctx.fillRect(cx - u * 0.5, cy + u * 0.78, u * 1.0, u * 0.1);
+    ctx.fillStyle = S.battery < 30 ? C.bug : C.zap; ctx.fillRect(cx - u * 0.48, cy + u * 0.8, u * 0.96 * Math.max(0, S.battery) / 100, u * 0.06);
+    // head: little monitor
+    var eyesBk = broken("eyes");
+    ctx.save(); ctx.translate(cx, cy - u * 0.55); ctx.rotate(eyesBk ? 0.12 : 0);
+    ctx.fillStyle = C.win; rr(-u * 0.64, -u * 0.48, u * 1.28, u * 0.92, u * 0.08); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.term; ctx.fillRect(-u * 0.5, -u * 0.36, u * 1.0, u * 0.62);
+    if (!eyesBk) {
+      ctx.fillStyle = C.zap;
+      if (dance) { ctx.fillRect(-u * 0.32, -u * 0.12, u * 0.16, u * 0.05); ctx.fillRect(u * 0.16, -u * 0.12, u * 0.16, u * 0.05); ctx.fillRect(-u * 0.36, -u * 0.07, u * 0.05, u * 0.05); ctx.fillRect(-u * 0.17, -u * 0.07, u * 0.05, u * 0.05); ctx.fillRect(u * 0.12, -u * 0.07, u * 0.05, u * 0.05); ctx.fillRect(u * 0.31, -u * 0.07, u * 0.05, u * 0.05); }
+      else { var blink = !reduceMotion && Math.sin(t * 1.3) > 0.985; ctx.fillRect(-u * 0.3, -u * 0.16, u * 0.14, blink ? u * 0.03 : u * 0.16); ctx.fillRect(u * 0.16, -u * 0.16, u * 0.14, blink ? u * 0.03 : u * 0.16); }
+      ctx.fillRect(-u * 0.16, u * 0.1, u * 0.32, u * 0.04);
+    } else {
+      ctx.fillStyle = C.bug; ctx.font = "700 " + Math.round(u * 0.22) + "px 'Fira Code', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("ERR", 0, -u * 0.04);
+    }
+    // antenna / zapper coil
+    ctx.lineWidth = 3 * dpr; ctx.strokeStyle = C.ink;
+    if (!broken("antenna")) {
+      ctx.beginPath(); ctx.moveTo(0, -u * 0.48); ctx.lineTo(0, -u * 0.8); ctx.stroke();
+      if (S.up.zap) { ctx.strokeStyle = C.zap; ctx.lineWidth = 2 * dpr; for (var k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(0, -u * (0.58 + k * 0.08), u * 0.1, u * 0.03, 0, 0, 7); ctx.stroke(); } ctx.strokeStyle = C.ink; ctx.lineWidth = 3 * dpr; }
+      ctx.fillStyle = S.up.zap ? C.zap : C.rust; ctx.fillRect(-u * 0.08, -u * 0.94, u * 0.16, u * 0.16); ctx.strokeRect(-u * 0.08, -u * 0.94, u * 0.16, u * 0.16);
+    } else {
+      ctx.beginPath(); ctx.moveTo(0, -u * 0.48); ctx.lineTo(u * 0.12, -u * 0.62); ctx.lineTo(u * 0.32, -u * 0.6); ctx.stroke();
+      ctx.fillStyle = C.dead; ctx.fillRect(u * 0.32, -u * 0.66, u * 0.12, u * 0.12); ctx.strokeRect(u * 0.32, -u * 0.66, u * 0.12, u * 0.12);
+    }
+    ctx.restore();
+    // small warm sparks on the part being fought over
+    if (S.broken >= 0 && !S.fixed[S.broken] && !reduceMotion) {
+      var spot = { antenna: [u * 0.38, -u * 1.15], eyes: [u * 0.5, -u * 0.6], arms: [u * 0.85, u * 0.3], core: [u * 0.11, u * 0.45], legs: [u * 0.4, u * 1.3] }[PARTS[S.broken].key];
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 2 * dpr;
+      for (var q = 0; q < 3; q++) { var a = t * 6 + q * 2.1, l = u * (0.1 + 0.05 * Math.sin(t * 11 + q)); ctx.beginPath(); ctx.moveTo(cx + spot[0], cy + spot[1]); ctx.lineTo(cx + spot[0] + Math.cos(a) * l, cy + spot[1] + Math.sin(a) * l); ctx.stroke(); }
+    }
+    if (dance) for (var f = 0; f < 26; f++) { var fx = (f * 97 + t * 60 * (1 + f % 3)) % playW, fy = (f * 53 + t * 140 * (1 + f % 2)) % Hc; ctx.fillStyle = [C.zap, C.rust, C.bug, C.hi][f % 4]; ctx.fillRect(fx, fy, 6 * dpr, 6 * dpr); }
+  }
+
+  // ---- rounds ----
+  function nextBreak() {
+    var open = []; S.fixed.forEach(function (f, i) { if (!f) open.push(i); });
+    S.broken = open[0];
+    S.phase = "squash"; S.t = ROUND; S.spawnT = 0.5; S.bugs = []; S.wall = WALL[S.up.wall];
+    toast(S.fixed.some(Boolean) ? "Next up: Bolt's " + PARTS[S.broken].name + ". Squash the bugs!" : "The Glitch wrecked Bolt! First fix: his " + PARTS[S.broken].name + ".");
+    beep(200, 0.15, "sawtooth", 0.03);
+    $("shop").hidden = false; resize(); renderShop();
+    last = performance.now(); hud();
+  }
+
+  // ---- debugger (repair) ----
+  var R = null, tries = 0;
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function hilite(line) {
+    var out = "", re = /("[^"]*")|(\b\d+\b)|(\b(?:for|in|range|while|if|else|elif|def|return|and|or|not|True|False|print|len|str)\b)/g, lastI = 0, m;
+    while ((m = re.exec(line))) {
+      out += esc(line.slice(lastI, m.index));
+      var cls = m[1] ? "str" : m[2] ? "num" : (/^(print|len|str|range)$/.test(m[3]) ? "fn" : "kw");
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>"; lastI = re.lastIndex;
+    }
+    return out + esc(line.slice(lastI));
+  }
+  function codeLine(l) {
+    var n = l.match(/^ */)[0].length, lead = "";
+    for (var k = 0; k + 4 <= n; k += 4) lead += '<span class="ind">    </span>';
+    return lead + " ".repeat(n % 4) + hilite(l.slice(n));
+  }
+  function startRepair() {
+    S.phase = "repair"; updateShop();
+    R = DB.make(S.level, HL); tries = 0;
+    var part = PARTS[S.broken].name;
+    villain("rVillain", pickOne(T_BREAK).replace("{p}", part));
+    $("rWinTitle").textContent = "DEBUGGER.EXE — " + part.toUpperCase().replace(" ", "_") + ".PY";
+    $("rTitle").textContent = "Fix the " + part;
+    $("rTag").textContent = "LEVEL " + S.level + " // PART " + (S.fixed.filter(Boolean).length + 1) + " OF 5 // " + (HL ? "HL" : "SL");
+    $("rCode").innerHTML = R.lines.map(function (l, i) { return '<div class="ln"><span class="n">' + (i + 1) + "</span><span>" + codeLine(l) + "</span></div>"; }).join("");
+    $("rNote").innerHTML = R.note;
+    var h = "<thead><tr><th></th>" + R.cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr></thead><tbody>";
+    if (R.start) h += '<tr><td class="rl">START</td>' + R.start.map(function (v) { return '<td class="given">' + esc(v) + "</td>"; }).join("") + "</tr>";
+    R.rows.forEach(function (row, ri) {
+      h += '<tr><td class="rl">' + (R.start ? "PASS " : "CALL ") + (ri + 1) + "</td>";
+      row.forEach(function (v, ci) {
+        if (v === null) h += '<td class="given">—</td>';
+        else h += '<td><input id="c_' + ri + "_" + ci + '" autocomplete="off" spellcheck="false" aria-label="' + esc(R.cols[ci]) + " row " + (ri + 1) + '"></td>';
+      });
+      h += "</tr>";
+    });
+    h += '<tr><td class="rl">OUTPUT</td><td colspan="' + R.cols.length + '"><input id="c_out" autocomplete="off" spellcheck="false" aria-label="Printed output"></td></tr></tbody>';
+    $("rTable").innerHTML = h;
+    $("rResult").hidden = true; $("rCheckRow").hidden = false; $("rCheck").disabled = false;
+    $("rTries").textContent = "2 checks before the part sparks out.";
+    $("repairScreen").hidden = false;
+    $("rTable").querySelectorAll("input").forEach(function (inp) { inp.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); check(); } }); });
+    var first = $("rTable").querySelector("input"); if (first) first.focus();
+    hud();
+  }
+  function cells() {
+    var list = [];
+    R.rows.forEach(function (row, ri) { row.forEach(function (v, ci) { if (v !== null) list.push({ el: $("c_" + ri + "_" + ci), want: v }); }); });
+    list.push({ el: $("c_out"), want: R.output });
+    return list;
+  }
+  // "13, 3" or "(13, 3)" for print(best, pos) is a formatting slip, not a tracing mistake
+  function loose(s) { return DB.norm(String(s).replace(/[(),]/g, " ")); }
+  function isClose(val, want) { return !/[,\[\]]/.test(want) && /[(),]/.test(val) && loose(val) === DB.norm(want); }
+  function check() {
+    if ($("rCheck").disabled) return;
+    tries++;
+    var all = cells(), wrong = 0, close = 0, pts = 0;
+    all.forEach(function (c) {
+      if (c.el.disabled) return;
+      c.el.classList.remove("no", "close");
+      if (DB.norm(c.el.value) === DB.norm(c.want)) { c.el.classList.add("ok"); c.el.disabled = true; if (tries === 1) pts += 10; }
+      else if (isClose(c.el.value, c.want)) { c.el.classList.add("close"); close++; }
+      else { c.el.classList.add("no"); wrong++; }
+    });
+    S.score += pts;
+    if (wrong === 0 && close === 0) return finishRepair(tries === 1);
+    if (wrong === 0) {
+      tries--;
+      $("rTries").textContent = "Almost! Python's print separates values with a space. No commas or brackets. Fix the yellow cell (this check didn't count).";
+      beep(520, 0.08, "triangle", 0.03);
+      var cl = $("rTable").querySelector("input.close"); if (cl) cl.focus();
+      return;
+    }
+    if (tries >= 2) {
+      all.forEach(function (c) { if (!c.el.disabled) { c.el.value = c.want; c.el.classList.remove("no", "close"); c.el.classList.add("fix"); c.el.disabled = true; } });
+      return finishRepair(false, true);
+    }
+    beep(180, 0.15, "square", 0.03);
+    $("rTries").textContent = (wrong + close) + " cell" + (wrong + close === 1 ? "" : "s") + " wrong. Green ones are locked in. One check left." + (close ? " Yellow means the values are right but print wouldn't show commas or brackets." : "");
+    var bad = $("rTable").querySelector("input.no, input.close"); if (bad) bad.focus();
+    hud();
+  }
+  $("rCheck").onclick = check;
+  function finishRepair(perfect, failed) {
+    $("rCheck").disabled = true; $("rCheckRow").hidden = true;
+    S.repairs++; S.fixed[S.broken] = true;
+    if (failed) {
+      S.battery -= 15;
+      $("rVerdict").className = "verdict bad"; $("rVerdict").textContent = "Sparks! The correct values are filled in. Battery −15.";
+      villain("rVillain", pickOne(T_LOSE)); beep(120, 0.35, "sawtooth", 0.04);
+    } else if (perfect) {
+      S.perfect++; var bonus = 150 * S.level; S.score += bonus; S.battery = Math.min(100, S.battery + 15); S.bytes += 25;
+      $("rVerdict").className = "verdict good"; $("rVerdict").textContent = "Perfect trace! +" + bonus + " points, +25 bytes, battery +15.";
+      villain("rVillain", pickOne(T_WIN)); beep(660, 0.1, "triangle", 0.04); setTimeout(function () { beep(990, 0.18, "triangle", 0.04); }, 110);
+    } else {
+      var b2 = 50 * S.level; S.score += b2; S.bytes += 10;
+      $("rVerdict").className = "verdict good"; $("rVerdict").textContent = "Fixed on the second check. +" + b2 + " points, +10 bytes.";
+      villain("rVillain", pickOne(T_WIN)); beep(520, 0.12, "triangle", 0.04);
+    }
+    $("rExplain").innerHTML = R.explain + "<br>Output: <code>" + esc(R.output) + "</code>";
+    var done = S.fixed.every(Boolean);
+    $("rNext").textContent = S.battery <= 0 ? "See results" : done ? "Power him up" : "Back to the bugs";
+    $("rResult").hidden = false; $("rNext").focus();
+    hud();
+  }
+  $("rNext").onclick = function () {
+    $("repairScreen").hidden = true;
+    if (S.battery <= 0) return gameOver();
+    S.broken = -1;
+    if (S.fixed.every(Boolean)) { S.phase = "dance"; S.dance = 3.2; beep(523, 0.15, "triangle", 0.04); setTimeout(function () { beep(659, 0.15, "triangle", 0.04); }, 160); setTimeout(function () { beep(784, 0.25, "triangle", 0.04); }, 320); return; }
+    nextBreak();
+  };
+  function showLevelDone() {
+    S.phase = "levelDone";
+    var bonus = 300 * S.level; S.score += bonus; S.bytes += 40;
+    $("lvTitle").textContent = "Bolt is fully repaired! +" + bonus + " and 40 bytes";
+    villain("lvVillain", "Enjoy it while it lasts. I'm bringing armoured bugs and nastier code.");
+    $("lvLine").textContent = "Level " + (S.level + 1) + " brings faster bugs, armoured bugs and trickier loops" + (HL ? ", plus more recursion." : ".") + " Your upgrades carry over.";
+    $("lvNext").textContent = "Start level " + (S.level + 1);
+    $("levelScreen").hidden = false; hud();
+  }
+  $("lvNext").onclick = function () { $("levelScreen").hidden = true; S.level++; S.fixed = [false, false, false, false, false]; nextBreak(); };
+  function gameOver() {
+    S.phase = "over"; updateShop();
+    var best = Math.max(loadBest(), S.score); saveBest(best);
+    $("oLevel").textContent = S.level; $("oScore").textContent = S.score;
+    $("oPerfect").textContent = S.perfect + "/" + S.repairs; $("oBugs").textContent = S.squashed; $("oBest").textContent = best;
+    $("oLine").textContent = S.score >= best && S.score > 0 ? "New personal best. Screenshot it for Mr. O." : "The Glitch wins this round. Reboot and go again.";
+    $("overScreen").hidden = false; beep(90, 0.6, "sawtooth", 0.05);
+  }
+  function start() {
+    ["titleScreen", "overScreen", "levelScreen", "repairScreen"].forEach(function (id) { $(id).hidden = true; });
+    newRun(); nextBreak();
+  }
+  $("startBtn").onclick = start; $("againBtn").onclick = start;
+  var b0 = loadBest(); if (b0) $("bestLine").textContent = "Your best: " + b0;
+
+  newRun(); resize(); hud(); requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
